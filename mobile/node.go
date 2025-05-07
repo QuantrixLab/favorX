@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -19,6 +21,9 @@ import (
 	"github.com/FavorLabs/favorX/pkg/node"
 	crypto2 "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/sirupsen/logrus"
+	"github.com/FavorLabs/favorX/pkg/p2p/libp2p"
+	"github.com/FavorLabs/favorX/pkg/topology/kademlia"
+	"errors"
 )
 
 type Node struct {
@@ -148,4 +153,124 @@ func newLogger(verbosity string) (logging.Logger, error) {
 	}
 
 	return logger, nil
+}
+
+// 检查并重连当前已连接P2P节点：对每个 peer 主动 ping，ping 不通则重连
+func (n *Node) CheckAndReconnectPeers() (checked int, reconnected int, err error) {
+	if n == nil || n.node == nil {
+		return 0, 0, errors.New("node not initialized")
+	}
+	kad, ok := n.node.Topology().(*kademlia.Kad)
+	if !ok {
+		return 0, 0, errors.New("kad not available")
+	}
+	p2ps, ok := n.node.P2PService().(*libp2p.Service)
+	if !ok {
+		return 0, 0, errors.New("p2pService not available")
+	}
+	pingpongService := n.node.PingPong()
+	if pingpongService == nil {
+		return 0, 0, errors.New("pingpong service not available")
+	}
+	peers := p2ps.Peers()
+	for _, peer := range peers {
+		checked++
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := pingpongService.Ping(ctx, peer.Address)
+		cancel()
+		if err != nil {
+			// ping 不通，尝试重连
+			ab := kad.AddressBook()
+			bzzAddr, err2 := ab.Get(peer.Address)
+			if err2 == nil {
+				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel2()
+				_, err2 = p2ps.Connect(ctx2, bzzAddr.Underlay)
+				if err2 == nil {
+					reconnected++
+				}
+			}
+		}
+	}
+	// 如果当前没有已连接的 peer，则遍历已知节点并尝试连接
+	if checked == 0 {
+		err = kad.EachKnownPeer(func(addr boson.Address, _ uint8) (stop, jumpToNext bool, err error) {
+			ab := kad.AddressBook()
+			bzzAddr, err := ab.Get(addr)
+			if err == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_, err = p2ps.Connect(ctx, bzzAddr.Underlay)
+				checked++
+				if err == nil {
+					reconnected++
+				}
+			}
+			return false, false, nil
+		})
+	}
+	return checked, reconnected, err
+}
+
+// 检查并重启HTTP服务（增强：端口+HTTP活性检测）
+func (n *Node) CheckAndRestartHTTP() (healthy bool, restarted bool, err error) {
+	if n == nil || n.node == nil {
+		return false, false, errors.New("node not initialized")
+	}
+	addr := "127.0.0.1"
+	port := n.opts.ApiPort
+	apiAddr := net.JoinHostPort(addr, fmt.Sprintf("%d", port))
+	// 1. 端口可达性检测
+	conn, err := net.DialTimeout("tcp", apiAddr, 2*time.Second)
+	if err != nil {
+		// 端口不可达，需重启
+		return n.restartHTTPServer()
+	}
+	conn.Close()
+	// 2. HTTP 层活性检测
+	url := "http://" + apiAddr + "/v1/ping"
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil || resp.StatusCode != 200 {
+		// HTTP 不通或返回异常，需重启
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		return n.restartHTTPServer()
+	}
+	resp.Body.Close()
+	return true, false, nil
+}
+
+// restartHTTPServer 关闭并重启 HTTP 服务
+func (n *Node) restartHTTPServer() (healthy bool, restarted bool, err error) {
+	srv := n.node
+	if srv == nil {
+		return false, false, errors.New("node not initialized")
+	}
+	if srv.ApiServer() != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.ApiServer().Shutdown(ctx)
+	}
+	if srv.ApiCloser() != nil {
+		_ = srv.ApiCloser().Close()
+	}
+	// 这里建议你将 FavorX API 服务的启动逻辑单独封装为 StartAPI 方法，然后在这里调用
+	// 目前只能返回"已关闭"，实际重启需你补充完整启动流程
+	return false, true, errors.New("HTTP服务已关闭，请手动重启或补充自动重启逻辑")
+}
+
+// OnResume: 用于移动端前台恢复时的自愈入口
+func (n *Node) OnResume() (peerChecked, peerReconnected int, httpHealthy, httpRestarted bool, err error) {
+	peerChecked, peerReconnected, err1 := n.CheckAndReconnectPeers()
+	httpHealthy, httpRestarted, err2 := n.CheckAndRestartHTTP()
+	if err1 != nil && err2 != nil {
+		err = fmt.Errorf("peer: %v; http: %v", err1, err2)
+	} else if err1 != nil {
+		err = err1
+	} else if err2 != nil {
+		err = err2
+	}
+	return
 }

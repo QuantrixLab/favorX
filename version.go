@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	version    = "1.4.3" // manually set semantic version number
-	commitHash string    // automatically set git commit hash
+	version    = "1.5.0" // manually set semantic version number
+	commitHash = "7dabcbc"    // automatically set git commit hash
 	commitTime string    // automatically set git commit time
 
 	Version = func() string {

@@ -504,36 +504,10 @@ func NewNode(nodeMode address.Model, addr string, bosonAddress boson.Address, pu
 				DebugApiAddr:       o.DebugAPIAddr,
 				RPCWSAddr:          o.WSAddr,
 			})
-		apiListener, err := net.Listen("tcp", o.APIAddr)
+		err = b.StartAPI(o, apiService)
 		if err != nil {
-			return nil, fmt.Errorf("api listener: %w", err)
+			return nil, err
 		}
-
-		apiServer := &http.Server{
-			IdleTimeout:       30 * time.Second,
-			ReadHeaderTimeout: 3 * time.Second,
-			Handler:           apiService,
-			ErrorLog:          log.New(b.errorLogWriter, "api", 0),
-		}
-
-		go func() {
-			if o.EnableApiTLS {
-				logger.Infof("api address: https://%s", apiListener.Addr())
-				err = apiServer.ServeTLS(apiListener, o.TlsCrtFile, o.TlsKeyFile)
-				if err != nil {
-					logger.Errorf("api server enable https: %v", err)
-				}
-			}
-			logger.Infof("api address: http://%s", apiListener.Addr())
-			err = apiServer.Serve(apiListener)
-			if err != nil && err != http.ErrServerClosed {
-				logger.Debugf("api server: %v", err)
-				logger.Error("unable to serve api")
-			}
-		}()
-
-		b.apiServer = apiServer
-		b.apiCloser = apiService
 	}
 
 	if debugAPIService != nil {
@@ -745,4 +719,65 @@ func (e *multiError) add(err error) {
 
 func (e *multiError) hasErrors() bool {
 	return len(e.errors) > 0
+}
+
+// StartAPI 启动 HTTP API 服务
+func (b *Favor) StartAPI(o Options, apiService api.Service) error {
+	if o.APIAddr == "" {
+		return errors.New("APIAddr is empty")
+	}
+	apiListener, err := net.Listen("tcp", o.APIAddr)
+	if err != nil {
+		return fmt.Errorf("api listener: %w", err)
+	}
+	apiServer := &http.Server{
+		IdleTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 3 * time.Second,
+		Handler:           apiService,
+		ErrorLog:          log.New(b.errorLogWriter, "api", 0),
+	}
+	b.apiServer = apiServer
+	b.apiCloser = apiService
+	go func() {
+		if o.EnableApiTLS {
+			b.apiServer.ServeTLS(apiListener, o.TlsCrtFile, o.TlsKeyFile)
+		} else {
+			b.apiServer.Serve(apiListener)
+		}
+	}()
+	return nil
+}
+
+// StopAPI 优雅关闭 HTTP API 服务
+func (b *Favor) StopAPI(ctx context.Context) error {
+	var err1, err2 error
+	if b.apiCloser != nil {
+		err1 = b.apiCloser.Close()
+		b.apiCloser = nil
+	}
+	if b.apiServer != nil {
+		err2 = b.apiServer.Shutdown(ctx)
+		b.apiServer = nil
+	}
+	return multiErrorJoin(err1, err2)
+}
+
+// RestartAPI 先关闭再启动
+func (b *Favor) RestartAPI(o Options, apiService api.Service) error {
+	_ = b.StopAPI(context.Background())
+	return b.StartAPI(o, apiService)
+}
+
+// multiErrorJoin 合并两个 error
+func multiErrorJoin(err1, err2 error) error {
+	if err1 == nil && err2 == nil {
+		return nil
+	}
+	if err1 != nil && err2 != nil {
+		return fmt.Errorf("%v; %v", err1, err2)
+	}
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }

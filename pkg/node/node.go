@@ -2,7 +2,12 @@ package node
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ecdsa"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -52,6 +57,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const exportKey = "dOVqGYDUcTSOS0D8FP8Z0qBNUGThii37qVjwQF0ML+c="
+
 type Favor struct {
 	p2pService       io.Closer
 	p2pCancel        context.CancelFunc
@@ -70,6 +77,7 @@ type Favor struct {
 	localstoreCloser io.Closer
 	topologyCloser   io.Closer
 	ethClientCloser  func()
+	Bootnodes        []string
 }
 
 type Options struct {
@@ -886,4 +894,119 @@ func (b *Favor) OnResume(apiAddr string) (peerChecked, peerReconnected int, http
 		err = err2
 	}
 	return
+}
+
+// ExportOutboundPeers 导出最多 max 个 outbound 类型已连接 peer 的 Underlay 地址，加密后 base64 输出
+func (b *Favor) ExportOutboundPeers(max int) (string, error) {
+	p2ps, ok := b.p2pService.(*libp2p.Service)
+	if !ok {
+		return "", errors.New("p2pService not available")
+	}
+	kad, ok := b.topologyCloser.(*kademlia.Kad)
+	if !ok {
+		return "", errors.New("kad not available")
+	}
+	var underlays []string
+	peers := p2ps.Peers()
+	for _, peer := range peers {
+		m := kad.SnapshotAddr(peer.Address)
+		if m == nil || string(m.SessionConnectionDirection) != "outbound" {
+			continue
+		}
+		ab := kad.AddressBook()
+		bzzAddr, err := ab.Get(peer.Address)
+		if err != nil {
+			continue
+		}
+		underlays = append(underlays, bzzAddr.Underlay.String())
+		if len(underlays) >= max {
+			break
+		}
+	}
+	data, err := json.Marshal(underlays)
+	if err != nil {
+		return "", err
+	}
+	key := []byte(exportKey + "9191ABC@")
+	enc, err := encryptAESGCM(data, key)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(enc), nil
+}
+
+// ImportBootNodes 解密 base64 字符串，解析出 Underlay 地址，存入 Favor.Bootnodes
+func (b *Favor) ImportBootNodes(enc string) error {
+	raw, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		return err
+	}
+	key := []byte(exportKey + "9191ABC@")
+	data, err := decryptAESGCM(raw, key)
+	if err != nil {
+		return err
+	}
+	var underlays []string
+	if err := json.Unmarshal(data, &underlays); err != nil {
+		return err
+	}
+	b.Bootnodes = underlays
+	return nil
+}
+
+// AES-GCM 加密
+func encryptAESGCM(plain, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	ciphertext := gcm.Seal(nonce, nonce, plain, nil)
+	return ciphertext, nil
+}
+
+// AES-GCM 解密
+func decryptAESGCM(ciphertext, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	if len(ciphertext) < gcm.NonceSize() {
+		return nil, errors.New("ciphertext too short")
+	}
+	nonce := ciphertext[:gcm.NonceSize()]
+	data := ciphertext[gcm.NonceSize():]
+	return gcm.Open(nil, nonce, data, nil)
+}
+
+// ConnectedPeerCount 返回当前 outbound 类型已连接 peer 数
+func (b *Favor) ConnectedPeerCount() int {
+	p2ps, ok := b.p2pService.(*libp2p.Service)
+	if !ok {
+		return 0
+	}
+	kad, ok := b.topologyCloser.(*kademlia.Kad)
+	if !ok {
+		return 0
+	}
+	count := 0
+	peers := p2ps.Peers()
+	for _, peer := range peers {
+		m := kad.SnapshotAddr(peer.Address)
+		if m != nil && string(m.SessionConnectionDirection) == "outbound" {
+			count++
+		}
+	}
+	return count
 }

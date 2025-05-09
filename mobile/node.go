@@ -3,6 +3,7 @@ package mobile
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -22,6 +23,8 @@ import (
 	"github.com/sirupsen/logrus"
 	_ "golang.org/x/mobile/bind"
 )
+
+const exportKey = "dOVqGYDUcTSOS0D8FP8Z0qBNUGThii37qVjwQF0ML+c="
 
 type Node struct {
 	node   *node.Favor
@@ -181,4 +184,28 @@ func (n *Node) OnResume() (*ResumeResult, error) {
 		return res, err
 	}
 	return res, nil
+}
+
+// ConnectedPeerCount 返回 outbound 类型已连接 peer 数
+func (n *Node) ConnectedPeerCount() int {
+	if n == nil || n.node == nil {
+		return 0
+	}
+	return n.node.ConnectedPeerCount()
+}
+
+// ExportOutboundPeers 导出最多 max 个 outbound 已连接节点的 Underlay 地址，加密后 base64 输出
+func (n *Node) ExportOutboundPeers(max int) (string, error) {
+	if n == nil || n.node == nil {
+		return "", errors.New("node not initialized")
+	}
+	return n.node.ExportOutboundPeers(max)
+}
+
+// ImportBootNodes 解密 base64 字符串，解析出 Underlay 地址，存入 Favor.Bootnodes
+func (n *Node) ImportBootNodes(enc string) error {
+	if n == nil || n.node == nil {
+		return errors.New("node not initialized")
+	}
+	return n.node.ImportBootNodes(enc)
 }

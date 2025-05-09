@@ -1,0 +1,9 @@
+go get github.com/multiformats/go-multiaddr@v0.5.0
+go get github.com/quic-go/quic-go@v0.27.0
+go get github.com/libp2p/go-libp2p@v0.20.0
+go get golang.org/x/crypto@v0.7.0
+go get golang.org/x/sync@v0.3.0
+go get golang.org/x/sys@v0.6.0
+go get github.com/prometheus/common@v0.32.1
+go get github.com/elastic/gosigar@v0.12.0
+go mod tidy

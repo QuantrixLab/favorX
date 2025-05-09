@@ -1341,3 +1341,8 @@ func isNetworkOrHostUnreachableError(err error) bool {
 	}
 	return false
 }
+
+// PingPong 兼容旧接口，返回自身实现的 Ping 方法
+func (s *Service) PingPong() func(ctx context.Context, addr ma.Multiaddr) (time.Duration, error) {
+	return s.Ping
+}

@@ -1885,3 +1885,8 @@ func isStaticPeer(staticNodes []boson.Address) func(overlay boson.Address) bool 
 		return false
 	}
 }
+
+// AddressBook 兼容旧接口，返回 addressBook 字段
+func (k *Kad) AddressBook() addressbook.Interface {
+	return k.addressBook
+}

@@ -1,6 +1,6 @@
 module github.com/FavorLabs/favorX
 
-go 1.18
+go 1.20
 
 require (
 	github.com/FavorLabs/manifest v1.2.0
@@ -46,6 +46,7 @@ require (
 	gitlab.com/nolash/go-mockbytes v0.0.7
 	go.uber.org/atomic v1.10.0
 	golang.org/x/crypto v0.4.0
+	golang.org/x/mobile v0.0.0-20230531173138-3c911d8e3eda
 	golang.org/x/net v0.5.0
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.4.0
@@ -144,6 +145,7 @@ require (
 	github.com/quic-go/qtls-go1-20 v0.1.0 // indirect
 	github.com/quic-go/quic-go v0.32.0 // indirect
 	github.com/quic-go/webtransport-go v0.5.0 // indirect
+	github.com/raulk/clock v1.1.0 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/rjeczalik/notify v0.9.2 // indirect
 	github.com/shirou/gopsutil v3.21.5+incompatible // indirect
@@ -168,7 +170,6 @@ require (
 	go.uber.org/multierr v1.8.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/exp v0.0.0-20221205204356-47842c84f3db // indirect
-	golang.org/x/mobile v0.0.0-20230531173138-3c911d8e3eda // indirect
 	golang.org/x/mod v0.7.0 // indirect
 	golang.org/x/tools v0.3.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20211104114900-415007cec224 // indirect
@@ -179,3 +180,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.1.7 // indirect
 )
+
+replace github.com/raulk/go-watchdog => github.com/status-im/go-watchdog v1.2.0-ios-nolibproc

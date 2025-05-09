@@ -18,3 +18,4 @@ dist/
 favorx.xcframework/
 lib/
 thirdparty/
+..bfg*
